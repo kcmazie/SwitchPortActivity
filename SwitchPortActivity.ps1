@@ -1,11 +1,10 @@
 Param(
 	[switch]$Console = $false,         #--[ Set to true to enable local console result display. Defaults to false ]--
 	[switch]$Debug = $False,           #--[ Generates extra console output for debugging.  Defaults to false ]--
-        [switch]$SafeUpdate = $False       #--[ Forces a copy made with a date/Time stamp prior to editing the spreadsheet as a safety backup. ]--  
+    [switch]$SafeUpdate = $False       #--[ Forces a copy made with a date/Time stamp prior to editing the spreadsheet as a safety backup. ]--  
 )
 <#PSScriptInfo
-.VERSION 1.00
-.GUID 
+.VERSION 1.10
 .AUTHOR Kenneth C. Mazie (kcmjr AT kcmjr.com)
 .DESCRIPTION 
 Tracks switch port status over time using MS Excel.  Full instructions are within the script.
@@ -56,7 +55,7 @@ Tracks switch port status over time using MS Excel.  Full instructions are withi
                    : 
     Last Update by : Kenneth C. Mazie                                           
    Version History : v1.00 - 04-16-23 - Original 
-    Change History : v2.00 - 00-00-00 - 
+    Change History : v1.10 - 05-18-23 - Adjusted coding for disabled ports when the description contains "bad".
 				   :                  
 ==============================================================================#>
 Clear-Host
@@ -87,18 +86,18 @@ If($Script:Debug){
 #==============================================================================
 #==[ Functions ]===============================================================
 
-Function StatusMsg ($Msg, $Color){
+Function StatusMsg ($Msg, $Color, $Debug){
     If ($Null -eq $Color){
         $Color = "Magenta"
     }
-    If ($Script:Debug){Write-Host "-- Script Status: $Msg" -ForegroundColor $Color}
+    If ($Debug){Write-Host "-- Script Status: $Msg" -ForegroundColor $Color}
     $Msg = ""
 }
 
 Function LoadConfig {
     #--[ Read and load configuration file ]-------------------------------------
     if (!(Test-Path "$PSScriptRoot\$ConfigFile")){                       #--[ Error out if configuration file doesn't exist ]--
-        StatusMsg "MISSING CONFIG FILE.  Script aborted." " Red"
+        StatusMsg "MISSING CONFIG FILE.  Script aborted." " Red" $Debug
         break;break;break
     }else{
         [xml]$Configuration = Get-Content "$PSScriptRoot\$ConfigFile"  #--[ Read & Load XML ]--    
@@ -135,23 +134,23 @@ Function CallPlink ($IP,$command){
         # plink-v73.exe -ssh -pw $password $username@$IP #-batch #"exit" #*>&1
         # Start-Sleep -Milliseconds 500
         #------------------------------------------------------------
-        StatusMsg "Plink IP: $IP" "Magenta"
+        StatusMsg "Plink IP: $IP" "Magenta" $Debug
         #$test = @(plink-v73.exe -ssh -no-antispoof -pw $Password $username@$IP $command ) #*>&1)
         $test = @(plink-v73.exe -ssh -no-antispoof -batch -pw $Password $username@$IP $command *>&1)
         If ($test -like "*abandoned*"){
-            StatusMsg "Switching Plink version" "Magenta"
+            StatusMsg "Switching Plink version" "Magenta" $Debug
             $Switch = $true
         }Else{
-            StatusMsg 'Plink version 73 test passed' 'Magenta'
+            StatusMsg 'Plink version 73 test passed' 'Magenta' $Debug
         }
         If ($Switch){
             $Msg = 'Executing Plink v52 (Command = '+$Command+')'
-            StatusMsg $Msg 'blue'
+            StatusMsg $Msg 'blue' $Debug
             $Result = @(plink-v52.exe -ssh -no-antispoof -batch -pw $Password $username@$IP $command *>&1) 
         }Else{
             $ErrorActionPreference = "continue"
             $Msg = 'Executing Plink v73 (Command = '+$Command+')'
-            StatusMsg $Msg 'magenta'
+            StatusMsg $Msg 'magenta' $Debug
             $Result = @(plink-v73.exe -ssh -no-antispoof -batch -pw $Password $username@$IP $command *>&1)
         }
         ForEach ($Line in $Result){
@@ -160,10 +159,10 @@ Function CallPlink ($IP,$command){
                 Break
             } 
         }
-        StatusMsg "Data collected..." "Magenta"
+        StatusMsg "Data collected..." "Magenta" $Debug
         Return $Result
     }Else{
-        StatusMsg "Pre-Plink PING check FAILED" "Red"
+        StatusMsg "Pre-Plink PING check FAILED" "Red" $Debug
     }
 } 
 
@@ -173,13 +172,13 @@ Function CellColor ($WorkSheet,$Item,$Row,$Col){
     Switch -Wildcard ([String]$Item){
         "*notconnect*" {
             $Status = "notconnect"
-            $Worksheet.Cells($Row, $Col).Font.ColorIndex = 10 
+            $Worksheet.Cells($Row, $Col).Font.ColorIndex = 10  #--[ Green ]--
             $Worksheet.Cells($Row, $Col).Font.Bold = $False
             Break
         }
         "*connected*" {
             $Status = "connected"
-            $Worksheet.Cells($Row, $Col).Font.ColorIndex = 3 
+            $Worksheet.Cells($Row, $Col).Font.ColorIndex = 3  #--[ Red ]--
             $Worksheet.Cells($Row, $Col).Font.Bold = $False
             #--[ If at any time a row cell goes red the port ID in column 1 is changed to a pale ]--
             #--[ yellow background to indicate that the port has had activity at some point during ]--
@@ -189,14 +188,22 @@ Function CellColor ($WorkSheet,$Item,$Row,$Col){
         } 
         "*err-disabled*" {
             $Status = "err-disabled"                                    
-            $Worksheet.Cells($Row, $Col).Font.ColorIndex = 6
-            $Worksheet.Cells($Row, $Col).Interior.ColorIndex = 3
+            $Worksheet.Cells($Row, $Col).Font.ColorIndex = 6  #--[ Yellow ]--
+            $Worksheet.Cells($Row, $Col).Interior.ColorIndex = 3  #--[ Red background ]--
             $Worksheet.Cells($Row, $Col).Font.Bold = $true
+            Break
+        } 
+        "*bad*" {
+            $Status = "bad-disabled"
+            $Worksheet.Cells($Row, $Col).Font.ColorIndex = 8  #--[ Cyan ]--
+            $Worksheet.Cells($Row, $Col).Interior.ColorIndex = 16  #--[ Grey background ]--
+            $Worksheet.Cells($Row, $Col).Font.Bold = $False
+            $Worksheet.Cells($Row, 1).Font.ColorIndex = 5  #--[ Blue ]--
             Break
         } 
         "*disabled*" {
             $Status = "disabled"
-            $Worksheet.Cells($Row, $Col).Font.ColorIndex = 5
+            $Worksheet.Cells($Row, $Col).Font.ColorIndex = 5  #--[ Blue ]--
             $Worksheet.Cells($Row, $Col).Font.Bold = $False
             Break
         } 
@@ -233,7 +240,7 @@ Function ProcessTarget ($WorkBook,$WorkSheet,$SheetCounter){
     #--[ Test and connect to target IP ]----------------------------------------------------------
     if ([string]$WorkSheet.cells.Item(1,($Col-1)).text -as [DateTime]) {  #--[ Cell IS a date ]--
         If ((Get-Date ($WorkSheet.cells.Item(1,($Col-1)).text) -Format MM-dd-yyyy) -eq $today){  #--[ Cell is today's date ]--
-            StatusMsg "Today has already been processed.  Moving to next IP..." "red"   
+            StatusMsg "Today has already been processed.  Moving to next IP..." "red" $Debug
             return  
         }
     }
@@ -243,24 +250,24 @@ Function ProcessTarget ($WorkBook,$WorkSheet,$SheetCounter){
     If (Test-Connection -ComputerName $IP -count 1 -BufferSize 16 -Quiet){
         $Worksheet.Cells(1, $Col).Font.ColorIndex = 0
         If (Test-Path -Path 'C:\Program Files\PuTTY\'){ 
-            StatusMsg "Calling PLINK" "Magenta"
+            StatusMsg "Calling PLINK" "Magenta" $Debug
             $command = 'sh int status'
             $Result = CallPlink $IP $command
         }Else{
-            StatusMsg "Cannot find PLINK.EXE.   Aborting..." "Red"
+            StatusMsg "Cannot find PLINK.EXE.   Aborting..." "Red" $Debug
             break;break
         }
 
         #==[ Parse Main Result Variable ]=======================================================
         StatusMsg "Parsing collected data..." "Magenta"
         If ($Result -eq "ACCESS-DENIED"){
-            StatusMsg "ACCESS DENIED" "Red"
+            StatusMsg "ACCESS DENIED" "Red" $Debug
             $Worksheet.Cells.Item(2, $Col) = "No Access"
             $Worksheet.Cells(2, $Col).Font.ColorIndex = 3   
             CellBorder $WorkSheet "2" $Col              
         }Else{
             $Row = 2  
-            StatusMsg  "Writing to column $Col" "Magenta"
+            StatusMsg  "Writing to column $Col" "Magenta" $Debug
             ForEach ($Item in $Result){  #--[ Parse results ]--
                 If ($Console){
                     Write-host "." -NoNewline
@@ -304,7 +311,7 @@ Function ProcessTarget ($WorkBook,$WorkSheet,$SheetCounter){
             CellBorder $WorkSheet 1 1
         }
     }Else{
-        StatusMsg "--- No Connection ---" "Red"
+        StatusMsg "--- No Connection ---" "Red" $Debug
         $Worksheet.Cells.Item(2,$Col) = "No Ping"
         $Worksheet.Cells(2,$Col).Font.ColorIndex = 3   # --[ End of connection ]--
         CellBorder $WorkSheet 2 $Col
@@ -358,7 +365,7 @@ If (!(Test-Path -Path $PasswordFile)){
     $Script:ManualCreds = Get-Credential -Message 'Enter an appropriate Domain\User and Password to continue.'
 }
 
-StatusMsg "Processing Cisco Switches" "Yellow"
+StatusMsg "Processing Cisco Switches" "Yellow" $Debug
 
 #--[ Close copies of Excel that PowerShell has open ]--
 $ProcID = Get-CimInstance Win32_Process | where {$_.name -like "*excel*"}
@@ -366,7 +373,7 @@ ForEach ($ID in $ProcID){  #--[ Kill any open instances to avoid issues ]--
     Foreach ($Proc in (get-process -id $id.ProcessId)){
         if (($ID.CommandLine -like "*/automation -Embedding") -Or ($proc.MainWindowTitle -like "$ExcelWorkingCopy*")){
             Stop-Process -ID $ID.ProcessId -Force
-            write-host "-- Killing any existing open PowerShell instance of Excel..." -ForegroundColor Red
+            StatusMsg "Killing any existing open PowerShell instance of Excel..." "Red" $Debug
             Start-Sleep -Milliseconds 100
         }
     }
@@ -377,7 +384,7 @@ $Excel = New-Object -ComObject Excel.Application -ErrorAction Stop
 
 #--[ Make a backup of the working copy, keep only the last 10 ]--
 If (($SafeUpdate)-And (Test-Path -Path "$PSScriptRoot\$ExcelWorkingCopy")){
-    StatusMsg "Safe-Update Enabled. Creating a backup copy of the working spreadsheet..." "Green"
+    StatusMsg "Safe-Update Enabled. Creating a backup copy of the working spreadsheet..." "Green" $Debug
     $Backup = $DateTime+"_"+$ExcelWorkingCopy+".bak"
     Copy-Item -Path "$PSScriptRoot\$ExcelWorkingCopy"  -Destination "$PSScriptRoot\$Backup"
     #--[ Only keep 10 of the last backups ]-- 
@@ -394,14 +401,14 @@ If (Test-Path -Path $TestFileName){
 #--[ Identify IP address list source and process. ]--
 If (Test-Path -Path $ListFileName){  #--[ If text file exists pull from there. ]--
     $IP = Get-Content $ListFileName          
-    StatusMsg "IP text list was found, loading IP list from it... " "green" 
+    StatusMsg "IP text list was found, loading IP list from it... " "green" $Debug 
     If (Test-Path -Path "$PSScriptRoot\$ExcelWorkingCopy"){
-        StatusMsg ">>>     WARNING: Working copy already exists.     <<<" "Yellow"
-        StatusMsg ">>>  New copy will be created and NOT over-write. <<<" "Yellow"
-        StatusMsg ">>> Remember to delete IP file prior to next run. <<<" "Yellow"
+        StatusMsg ">>>     WARNING: Working copy already exists.     <<<" "Yellow" $Debug
+        StatusMsg ">>>  New copy will be created and NOT over-write. <<<" "Yellow" $Debug
+        StatusMsg ">>> Remember to delete IP file prior to next run. <<<" "Yellow" $Debug
         Start-Sleep -Seconds 5
     }
-    StatusMsg "Creating new Spreadsheet..." "green"
+    StatusMsg "Creating new Spreadsheet..." "green" $Debug
     $Workbook = $Excel.Workbooks.Add()
     $Excel.Visible = $True
     $Worksheet = $Workbook.Sheets.Item(1)   
@@ -415,7 +422,7 @@ If (Test-Path -Path $ListFileName){  #--[ If text file exists pull from there. ]
     ForEach ($Address in $IP){
         $WorkSheet.Cells.Item($Row,1) = $Address
         $Row++    
-        StatusMsg  "Adding new workbook for $Address" "Magenta"
+        StatusMsg  "Adding new workbook for $Address" "Magenta" $Debug
         $LastSheet = $WorkBook.Worksheets | Select-Object -Last 1
         $NewSheet = $WorkBook.worksheets.add($LastSheet)
         $NewSheet.Name = $Address
@@ -424,7 +431,7 @@ If (Test-Path -Path $ListFileName){  #--[ If text file exists pull from there. ]
     $Resize = $WorkSheet.UsedRange
     [Void]$Resize.EntireColumn.AutoFit()
 }Else{  #--[ If no text file exists try to pull IPs from Excel ]--
-    StatusMsg "IP text list not found, attempting to process spreadsheet... " "cyan"
+    StatusMsg "IP text list not found, attempting to process spreadsheet... " "cyan" $Debug
     #--[ Verify if a working copy exists, otherwise copy from source ]--
     If (Test-Path -Path "$PSScriptRoot\$ExcelWorkingCopy" -PathType Leaf){
         Write-host "-- Referencing " -NoNewline -ForegroundColor Green
@@ -436,14 +443,14 @@ If (Test-Path -Path $ListFileName){  #--[ If text file exists pull from there. ]
         $WorkSheet.activate()
     }Else{
         If (!(Test-Path -Path "$PSScriptRoot\$ExcelWorkingCopy" -PathType Leaf)){ 
-            StatusMsg "Excel working copy is missing, copying from source..." "Magenta"
+            StatusMsg "Excel working copy is missing, copying from source..." "Magenta" $Debug
             If (Test-Path -Path "$SourcePath\$ExcelSourceFile" -PathType Leaf){
-                StatusMsg "Master source file located and copied to script folder..." "Green"
+                StatusMsg "Master source file located and copied to script folder..." "Green" $Debug
                 Copy-Item -Path "$SourcePath\$ExcelSourceFile"  -Destination "$PSScriptRoot\$ExcelWorkingCopy" -force
                 $Excel.Visible = $true
                 $Excel.displayalerts = $False
                 $WorkBook = $Excel.Workbooks.Open("$PSScriptRoot\$ExcelWorkingCopy")
-                StatusMsg "Removing un-needed worksheets..." "Green"
+                StatusMsg "Removing un-needed worksheets..." "Green" $Debug
                 ForEach ($Sheet in $WorkBook.Worksheets){
                     If ($Sheet.Name -ne "Switches"){
                         $Sheet.Delete()
@@ -454,7 +461,7 @@ If (Test-Path -Path $ListFileName){  #--[ If text file exists pull from there. ]
                 [void]$sheet.Cells.Item(1, 1).EntireRow.Delete() #--[ Delete the first row again ]--
                 $WorkBook.Save()  #--[ Save the new spreadsheet prior to processing ]--
             }Else{
-                StatusMsg "Master source file not found, Nothing to process.  Exiting... " "Red"
+                StatusMsg "Master source file not found, Nothing to process.  Exiting... " "Red" $Debug
                 Break;Break
             }
         }
@@ -465,7 +472,7 @@ If (Test-Path -Path $ListFileName){  #--[ If text file exists pull from there. ]
     $PreviousIP = ""
     $CurrentIP = ""
     If ($Console){
-        StatusMsg "Reading Spreadsheet... " "Magenta"
+        StatusMsg "Reading Spreadsheet... " "Magenta" $Debug
     }
     Do {
         $CurrentIP = $WorkSheet.Cells.Item($Row,1).Text  
@@ -477,7 +484,7 @@ If (Test-Path -Path $ListFileName){  #--[ If text file exists pull from there. ]
         $Row++
 
         If (!($WorkBook.worksheets | Where-Object {$_.name -eq $CurrentIP})){
-            StatusMsg  "Adding new workbook for $CurrentIP" "Magenta"
+            StatusMsg  "Adding new workbook for $CurrentIP" "Magenta" $Debug
             $LastSheet = $WorkBook.Worksheets | Select-Object -Last 1
             $NewSheet = $WorkBook.worksheets.add($LastSheet)
             $NewSheet.Name = $CurrentIP
@@ -505,19 +512,19 @@ ForEach ($Book in $WorkBook.worksheets | Where-Object {$_.Name -ne "Switches"}){
 Write-host ""
 Try{ 
     If ((Test-Path -Path $ListFileName) -And (Test-Path -Path "$PSScriptRoot\$ExcelWorkingCopy")){
-        StatusMsg 'Saving as "NewSpreadsheet.xlsx" ...' "Green"
+        StatusMsg 'Saving as "NewSpreadsheet.xlsx" ...' "Green" $Debug
         $Workbook.SaveAs("$PSScriptRoot\NewSpreadsheet.xlsx")
     }ElseIf(!(Test-Path -Path "$PSScriptRoot\$ExcelWorkingCopy")){
-        StatusMsg "Saving as a new working spreadsheet... " "Green"
+        StatusMsg "Saving as a new working spreadsheet... " "Green" $Debug
         $Workbook.SaveAs("$PSScriptRoot\$ExcelWorkingCopy")
     }Else{
-        StatusMsg "Saving working spreadsheet... " "Green"
+        StatusMsg "Saving working spreadsheet... " "Green" $Debug
         $WorkBook.Close($true) #--[ Close workbook and save changes ]--
     }
     $Excel.quit() #--[ Quit Excel ]--
     [Runtime.Interopservices.Marshal]::ReleaseComObject($Excel) #--[ Release the COM object ]--
 }Catch{
-    StatusMsg "Save Failed..." "Red"
+    StatusMsg "Save Failed..." "Red" $Debug
 }
 
 Write-Host `n"--- COMPLETED ---" -ForegroundColor red
