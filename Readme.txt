@@ -45,5 +45,5 @@ A PowerShell Script to track Cisco switch port activity over time on MS Excel
                : not limited to the following:
                :
 Last Update by : Kenneth C. Mazie.
-Change History : v1.00 - 04-16-23 - Original Draft 
-       Updates : v2.00 - 00-00-00 - 
+Change History : v1.00 - 04-16-23 - Original Draft
+               : v1.10 - 05-18-23 - Adjusted coding for disabled ports when the description contains "bad".
