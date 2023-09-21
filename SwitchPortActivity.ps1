@@ -146,10 +146,6 @@ Function CallPlink ($IP,$command){
         If ($test -like "*Keyboard-interactive*"){
             StatusMsg "Target SSH key has been stored." "green"
         }
-
-
-
-
         If ($test -like "*abandoned*"){
             StatusMsg "Switching Plink version" "Magenta" $Debug
             $Switch = $true
@@ -173,7 +169,6 @@ Function CallPlink ($IP,$command){
             } 
         }
         StatusMsg "Data collected..." "Magenta" $Debug
-        $result
         Return $Result
     }Else{
         StatusMsg "Pre-Plink PING check FAILED" "Red" $Debug
