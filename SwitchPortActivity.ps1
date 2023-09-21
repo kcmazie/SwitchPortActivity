@@ -1,10 +1,10 @@
 Param(
-	[switch]$Console = $false,         #--[ Set to true to enable local console result display. Defaults to false ]--
-	[switch]$Debug = $False,           #--[ Generates extra console output for debugging.  Defaults to false ]--
+    [switch]$Console = $false,         #--[ Set to true to enable local console result display. Defaults to false ]--
+    [switch]$Debug = $False,           #--[ Generates extra console output for debugging.  Defaults to false ]--
     [switch]$SafeUpdate = $False       #--[ Forces a copy made with a date/Time stamp prior to editing the spreadsheet as a safety backup. ]--  
 )
 <#PSScriptInfo
-.VERSION 1.10
+.VERSION 1.20
 .AUTHOR Kenneth C. Mazie (kcmjr AT kcmjr.com)
 .DESCRIPTION 
 Tracks switch port status over time using MS Excel.  Full instructions are within the script.
@@ -26,24 +26,24 @@ Tracks switch port status over time using MS Excel.  Full instructions are withi
                    : master inventory.  Each IP gets a dedicated worksheet labeled with the IP.  Column A 
                    : is the port ID.  Cell "A1" is a ROUGH total port count.  The top row is the date.
                    : The spreadsheet is color coded for readability:
-                   : - If a port at any time registers as connected the "A" colum gets high-lited.
+                   : - If a port at any time registers as connected the "A" colum gets high-lighted.
                    : - Connected ports are red.
                    : - Not-connected ports are green (OK to unplug).
                    : - A connection change is flagged in bold violet
                    : - Disabled ports are tagged blue
-		           :
+                   :
       Requirements : Plink.exe must be available in your path or the full path must be included in the 
                    : commandline(s) below.  2 versions are used in case of version issues.  These are located
                    : in the same folder and named according to version (see line 136 below). Excel must be 
-                   : available on the local PC.  SSH Keys must already be stored on the local PC through the
-                   : use of PuTTY or conenction will fail.  An option exists to add it below.
-	               : 
+                   : available on the local PC.  SSH Keys can already be stored on the local PC through the
+                   : prior use of PuTTY or the script will add them.
+                   : 
    Option Switches : $Console - If Set to $true will display status during run (Defaults to $True)
-                   : $Debug - If set to $true adds extra output on screen (Defaults to $false)
+                   : $Debug - If set to $true adds extra output on screen.  Forces console option to "true" (Defaults to $false)
                    : $SafeUpdate - If set to $True backs up spreadsheet prior to updating.  Keeps 10 copies.
                    :
-          Warnings : Excel is set to be visible (can be changed) so don't mess with it while the script is 
-                   : running or it can crash.  Don't click in spreadsheet while running or the script will crash.
+          Warnings : Excel is set to be visible (can be changed) so don't mess with Excel while the script is 
+                   : running or it can crash.  I.e. Don't click in spreadsheet while running or the script will crash.
                    :   
              Legal : Public Domain. Modify and redistribute freely. No rights reserved.
                    : SCRIPT PROVIDED "AS IS" WITHOUT WARRANTIES OR GUARANTEES OF 
@@ -56,7 +56,8 @@ Tracks switch port status over time using MS Excel.  Full instructions are withi
     Last Update by : Kenneth C. Mazie                                           
    Version History : v1.00 - 04-16-23 - Original 
     Change History : v1.10 - 05-18-23 - Adjusted coding for disabled ports when the description contains "bad".
-				   :                  
+                   : v1.20 - 09-20-23 - Added ability to store PuTTY SSH keys automatically for new targets.
+                   :                  
 ==============================================================================#>
 Clear-Host
 #Requires -version 5
@@ -137,6 +138,18 @@ Function CallPlink ($IP,$command){
         StatusMsg "Plink IP: $IP" "Magenta" $Debug
         #$test = @(plink-v73.exe -ssh -no-antispoof -pw $Password $username@$IP $command ) #*>&1)
         $test = @(plink-v73.exe -ssh -no-antispoof -batch -pw $Password $username@$IP $command *>&1)
+        If ($test -like "*The server's host key is not cached in the registry*"){
+            StatusMsg "Target SSH key not currently in system registry." "red"
+            write-output "y" | plink-v73.exe -ssh -pw $Password $username@$IP 'exit'
+            $test = @(plink-v73.exe -ssh -no-antispoof -batch -pw $Password $username@$IP $command *>&1) 
+        }
+        If ($test -like "*Keyboard-interactive*"){
+            StatusMsg "Target SSH key has been stored." "green"
+        }
+
+
+
+
         If ($test -like "*abandoned*"){
             StatusMsg "Switching Plink version" "Magenta" $Debug
             $Switch = $true
@@ -148,7 +161,7 @@ Function CallPlink ($IP,$command){
             StatusMsg $Msg 'blue' $Debug
             $Result = @(plink-v52.exe -ssh -no-antispoof -batch -pw $Password $username@$IP $command *>&1) 
         }Else{
-            $ErrorActionPreference = "continue"
+            $ErrorActionPreference = "stop"
             $Msg = 'Executing Plink v73 (Command = '+$Command+')'
             StatusMsg $Msg 'magenta' $Debug
             $Result = @(plink-v73.exe -ssh -no-antispoof -batch -pw $Password $username@$IP $command *>&1)
@@ -160,6 +173,7 @@ Function CallPlink ($IP,$command){
             } 
         }
         StatusMsg "Data collected..." "Magenta" $Debug
+        $result
         Return $Result
     }Else{
         StatusMsg "Pre-Plink PING check FAILED" "Red" $Debug
@@ -251,7 +265,7 @@ Function ProcessTarget ($WorkBook,$WorkSheet,$SheetCounter){
         $Worksheet.Cells(1, $Col).Font.ColorIndex = 0
         If (Test-Path -Path 'C:\Program Files\PuTTY\'){ 
             StatusMsg "Calling PLINK" "Magenta" $Debug
-            $command = 'sh int status'
+            $command = 'sh int status;exit'
             $Result = CallPlink $IP $command
         }Else{
             StatusMsg "Cannot find PLINK.EXE.   Aborting..." "Red" $Debug
@@ -462,6 +476,7 @@ If (Test-Path -Path $ListFileName){  #--[ If text file exists pull from there. ]
                 $WorkBook.Save()  #--[ Save the new spreadsheet prior to processing ]--
             }Else{
                 StatusMsg "Master source file not found, Nothing to process.  Exiting... " "Red" $Debug
+                StatusMsg "$SourcePath\$ExcelSourceFile" "Red" $Debug
                 Break;Break
             }
         }
@@ -538,7 +553,7 @@ Write-Host `n"--- COMPLETED ---" -ForegroundColor red
         <Domain>company.org</Domain>
     </General>
     <Credentials>
-	<PasswordFile>c:\pw.txt</PasswordFile>
+    <PasswordFile>c:\pw.txt</PasswordFile>
         <KeyFile>c:\key.txt</KeyFile>
     </Credentials>
 </Settings>    
